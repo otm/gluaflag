@@ -77,22 +77,23 @@ func doString(src string, t *testing.T) (stdout, stderr string) {
 
 func TestUsage(t *testing.T) {
 	src := `
-  local flag = require('flag')
-  arg = {"-foo"}
-  fs = flag.new("subcommand")
-  fs:number("times", 1, "Number help string")
-  function fail()
-    flags = fs:parse(arg)
-  end
-  ok, err = pcall(fail)
+	local flag = require('flag')
+	arg = {"-foo"}
+	arg[0] = "subcmd"
+	fs = flag.new("subcommand")
+	fs:number("times", 1, "Number help string")
+	function fail()
+		flags = fs:parse(arg)
+	end
+	ok, err = pcall(fail)
 
-  print(ok)
-  print(err)
-  `
+	print(ok)
+	print(err)
+	`
 
 	expected := strings.Join([]string{
 		"false",
-		"<string>:7: flag provided but not defined: -foo",
+		"<string>:8: flag provided but not defined: -foo",
 	}, "\n")
 	expectedStderr := strings.Join([]string{
 		"flag provided but not defined: -foo",
@@ -109,15 +110,16 @@ func TestUsage(t *testing.T) {
 
 func TestNumberFlag(t *testing.T) {
 	src := `
-  local flag = require('flag')
-  arg = {"-times", "2"}
-  fs = flag.new()
-  fs:number("times", 1, "Number help string")
-  flags = fs:parse(arg)
+	local flag = require('flag')
+	arg = {"-times", "2"}
+	arg[0] = "subcmd"
+	fs = flag.new()
+	fs:number("times", 1, "Number help string")
+	flags = fs:parse(arg)
 
-  print(flags.times)
-  print(type(flags.times))
-  `
+	print(flags.times)
+	print(type(flags.times))
+	`
 
 	expected := "2\nnumber"
 	got, _ := doString(src, t)
@@ -129,15 +131,16 @@ func TestNumberFlag(t *testing.T) {
 
 func TestIntFlag(t *testing.T) {
 	src := `
-  local flag = require('flag')
-  arg = {"-times", "2"}
-  fs = flag.new()
-  fs:int("times", 1, "Number help string")
-  flags = fs:parse(arg)
+	local flag = require('flag')
+	arg = {"-times", "2"}
+	arg[0] = "subcmd"
+	fs = flag.new()
+	fs:int("times", 1, "Number help string")
+	flags = fs:parse(arg)
 
-  print(flags.times)
-  print(type(flags.times))
-  `
+	print(flags.times)
+	print(type(flags.times))
+	`
 
 	expected := "2\nnumber"
 	got, _ := doString(src, t)
@@ -149,15 +152,16 @@ func TestIntFlag(t *testing.T) {
 
 func TestIntSliceFlag(t *testing.T) {
 	src := `
-  local flag = require('flag')
-  arg = {"-times", "2", "-times", "4"}
-  fs = flag.new()
-  fs:ints("times", "Number help string")
-  flags = fs:parse(arg)
+	local flag = require('flag')
+	arg = {"-times", "2", "-times", "4"}
+	arg[0] = "subcmd"
+	fs = flag.new()
+	fs:ints("times", "Number help string")
+	flags = fs:parse(arg)
 
-  print(type(flags.times))
-  print(table.concat(flags.times, ","))
-  `
+	print(type(flags.times))
+	print(table.concat(flags.times, ","))
+	`
 
 	expected := "table\n2,4"
 	got, _ := doString(src, t)
@@ -169,18 +173,18 @@ func TestIntSliceFlag(t *testing.T) {
 
 func TestNumberFlagCompgen(t *testing.T) {
 	src := `
-  local flag = require('flag')
-  arg = {"-times"}
-  arg[0] = "subcommand"
-  fs = flag.new()
-  local function compgen()
-    return "1 2 3"
-  end
-  fs:number("times", 1, "Number help string", compgen)
-  flags = fs:compgen(2, arg)
+	local flag = require('flag')
+	arg = {"-times"}
+	arg[0] = "subcommand"
+	fs = flag.new()
+	local function compgen()
+		return "1 2 3"
+	end
+	fs:number("times", 1, "Number help string", compgen)
+	flags = fs:compgen(2, arg)
 
-  print(flags)
-  `
+	print(flags)
+	`
 
 	expected := strings.Join([]string{
 		"1",
@@ -196,19 +200,20 @@ func TestNumberFlagCompgen(t *testing.T) {
 
 func TestNumberFlagAndArgs(t *testing.T) {
 	src := `
-  local flag = require('flag')
-  arg = {"-times", "2", "foo"}
-  fs = flag.new()
-  fs:number("times", 1, "Number help string")
-  flags = fs:parse(arg)
+	local flag = require('flag')
+	arg = {"-times", "2", "foo"}
+	arg[0] = "subcmd"
+	fs = flag.new()
+	fs:number("times", 1, "Number help string")
+	flags = fs:parse(arg)
 
-  print(flags.times)
-  print(type(flags.times))
-  for i, v in ipairs(flags) do
-    print(i .. "=" .. v)
-  end
-  print(flags[1])
-  `
+	print(flags.times)
+	print(type(flags.times))
+	for i, v in ipairs(flags) do
+		print(i .. "=" .. v)
+	end
+	print(flags[1])
+	`
 
 	expected := strings.Join([]string{
 		"2",
@@ -225,15 +230,16 @@ func TestNumberFlagAndArgs(t *testing.T) {
 
 func TestNumberSliceFlag(t *testing.T) {
 	src := `
-  local flag = require('flag')
-  arg = {"-times", "2.4", "-times", "4.3"}
-  fs = flag.new()
-  fs:numbers("times", "Number help string")
-  flags = fs:parse(arg)
+	local flag = require('flag')
+	arg = {"-times", "2.4", "-times", "4.3"}
+	arg[0] = "subcmd"
+	fs = flag.new()
+	fs:numbers("times", "Number help string")
+	flags = fs:parse(arg)
 
-  print(type(flags.times))
-  print(table.concat(flags.times, ","))
-  `
+	print(type(flags.times))
+	print(table.concat(flags.times, ","))
+	`
 
 	expected := "table\n2.4,4.3"
 	got, _ := doString(src, t)
@@ -245,15 +251,16 @@ func TestNumberSliceFlag(t *testing.T) {
 
 func TestStringFlag(t *testing.T) {
 	src := `
-  local flag = require('flag')
-  arg = {"-name", "bar"}
-  fs = flag.new()
-  fs:string("name", "foo", "String help string")
-  flags = fs:parse(arg)
+	local flag = require('flag')
+	arg = {"-name", "bar"}
+	arg[0] = "subcmd"
+	fs = flag.new()
+	fs:string("name", "foo", "String help string")
+	flags = fs:parse(arg)
 
-  print(flags.name)
-  print(type(flags.name))
-  `
+	print(flags.name)
+	print(type(flags.name))
+	`
 
 	expected := strings.Join([]string{
 		"bar",
@@ -268,18 +275,18 @@ func TestStringFlag(t *testing.T) {
 
 func TestStringFlagCompgen(t *testing.T) {
 	src := `
-  local flag = require('flag')
-  arg = {"-name"}
-  arg[0] = "subcommand"
-  fs = flag.new()
-  local function compgen()
-    return "fii foo fum"
-  end
-  fs:string("name", "foo", "String help string", compgen)
-  flags = fs:compgen(2, arg)
+	local flag = require('flag')
+	arg = {"-name"}
+	arg[0] = "subcommand"
+	fs = flag.new()
+	local function compgen()
+		return "fii foo fum"
+	end
+	fs:string("name", "foo", "String help string", compgen)
+	flags = fs:compgen(2, arg)
 
-  print(flags)
-  `
+	print(flags)
+	`
 
 	expected := strings.Join([]string{
 		"fii",
@@ -295,15 +302,16 @@ func TestStringFlagCompgen(t *testing.T) {
 
 func TestStringSliceFlag(t *testing.T) {
 	src := `
-  local flag = require('flag')
-  arg = {"-times", "foo", "-times", "bar"}
-  fs = flag.new()
-  fs:strings("times", "Number help string")
-  flags = fs:parse(arg)
+	local flag = require('flag')
+	arg = {"-times", "foo", "-times", "bar"}
+	arg[0] = "subcmd"
+	fs = flag.new()
+	fs:strings("times", "Number help string")
+	flags = fs:parse(arg)
 
-  print(type(flags.times))
-  print(table.concat(flags.times, ","))
-  `
+	print(type(flags.times))
+	print(table.concat(flags.times, ","))
+	`
 
 	expected := "table\nfoo,bar"
 	got, _ := doString(src, t)
@@ -315,15 +323,16 @@ func TestStringSliceFlag(t *testing.T) {
 
 func TestStringSliceNoValues(t *testing.T) {
 	src := `
-  local flag = require('flag')
-  arg = {}
-  fs = flag.new()
-  fs:strings("times", "Number help string")
-  flags = fs:parse(arg)
+	local flag = require('flag')
+	arg = {}
+	arg[0] = "subcmd"
+	fs = flag.new()
+	fs:strings("times", "Number help string")
+	flags = fs:parse(arg)
 
-  print(type(flags.times))
-  print(table.concat(flags.times, ","))
-  `
+	print(type(flags.times))
+	print(table.concat(flags.times, ","))
+	`
 
 	expected := "table\n"
 	got, _ := doString(src, t)
@@ -335,15 +344,16 @@ func TestStringSliceNoValues(t *testing.T) {
 
 func TestBoolFlag(t *testing.T) {
 	src := `
-  local flag = require('flag')
-  arg = {"-q"}
-  fs = flag.new()
-  fs:bool("q", false, "Bool help string")
-  flags = fs:parse(arg)
+	local flag = require('flag')
+	arg = {"-q"}
+	arg[0] = "subcmd"
+	fs = flag.new()
+	fs:bool("q", false, "Bool help string")
+	flags = fs:parse(arg)
 
-  print(flags.q)
-  print(type(flags.q))
-  `
+	print(flags.q)
+	print(type(flags.q))
+	`
 
 	expected := strings.Join([]string{
 		"true",
@@ -356,23 +366,175 @@ func TestBoolFlag(t *testing.T) {
 	}
 }
 
-func TestArgumentCompgen(t *testing.T) {
+func TestStringArg(t *testing.T) {
 	src := `
-  local flag = require('flag')
-  arg = {"-name", "foo"}
-  arg[0] = "subcommand"
-  fs = flag.new()
-  local function compgen()
-    return "fii foo fum"
-  end
-  fs:string("name", "foo", "String help string", compgen)
-  fs:argument("mr", 1, "Title", function()
-    return "mr miss mrs"
-  end)
-  flags = fs:compgen(3, arg)
+	local flag = require('flag')
+	arg = {"test", "-name", "foo", "mr"}
+	fs = flag.new()
+	local function compgen()
+		return "fii foo fum"
+	end
+	fs:string("name", "foo", "String help string", compgen)
+	fs:stringArg("title", 1, "Title", function()
+		return "mr miss mrs"
+	end)
+	flags = fs:parse(arg)
 
-  print(flags)
-  `
+	function pairsByKeys(t)
+		local a = {}
+		for n in pairs(t) do table.insert(a, n) end
+		table.sort(a)
+		local i = 0			-- iterator variable
+		local iter = function ()	 -- iterator function
+			i = i + 1
+			if a[i] == nil then return nil
+			else return a[i], t[a[i]]
+			end
+		end
+		return iter
+	end
+
+	for k, v in pairsByKeys(flags) do
+		print(k .. " " .. v)
+	end
+	`
+
+	expected := strings.Join([]string{
+		"name foo",
+		"title mr",
+	}, "\n")
+	got, _ := doString(src, t)
+
+	if got != expected {
+		t.Errorf("expected: `%v`, got: `%v`\nsrc: `%v`", expected, got, src)
+	}
+}
+
+func TestOptionalStringArg(t *testing.T) {
+	src := `
+	local flag = require('flag')
+	arg = {"-name", "foo", "bar"}
+	arg[0] = "subcommand"
+	fs = flag.new()
+	fs:string("name", "foo", "String help string")
+	fs:stringArg("title", "?", "Title")
+	flags = fs:parse(arg)
+	assert(flags.title == "bar", "expected flags.title to be 'bar'")
+	`
+	doString(src, t)
+}
+
+func TestOptionalStringsArg(t *testing.T) {
+	src := `
+	local flag = require('flag')
+	arg = {"-name", "foo", "bar"}
+	arg[0] = "subcommand"
+	fs = flag.new()
+	fs:string("name", "foo", "String help string")
+	fs:stringArg("title", "*", "Title")
+	flags = fs:parse(arg)
+	assert(type(flags.title) == "table", "expected flags.title to be a 'table'")
+	assert(#flags.title == 1, "expected flags.title to have length == 1")
+	assert(flags.title[1] == "bar", "expected flags.title[1] to be 'bar'")
+	`
+	doString(src, t)
+}
+
+func TestStringsArg(t *testing.T) {
+	src := `
+	local flag = require('flag')
+	arg = {"-name", "foo", "bar"}
+	arg[0] = "subcommand"
+	fs = flag.new()
+	fs:string("name", "foo", "String help string")
+	fs:stringArg("title", "+", "Title")
+	flags = fs:parse(arg)
+	assert(type(flags.title) == "table", "expected flags.title to be a 'table'")
+	assert(#flags.title == 1, "expected flags.title to have length == 1")
+	assert(flags.title[1] == "bar", "expected flags.title[1] to be 'bar'")
+	`
+	doString(src, t)
+}
+
+func TestStringsArgToFew(t *testing.T) {
+	src := `
+	local flag = require('flag')
+	arg = {"-name", "foo"}
+	arg[0] = "subcommand"
+	fs = flag.new()
+	fs:string("name", "foo", "String help string")
+	fs:stringArg("title", "+", "Title")
+	ok, err = pcall(function() fs:parse(arg) end)
+	print(err)
+	`
+	expected := "<string>:8: argument title: expected at least one string"
+	stdout, _ := doString(src, t)
+	if stdout != expected {
+		t.Errorf("expected: `%v`\ngot: `%v`\nsrc: `%v`", expected, stdout, src)
+	}
+}
+
+func TestNStringsArgument(t *testing.T) {
+	src := `
+	local flag = require('flag')
+	arg = {"-name", "foo", "bar", "baz"}
+	arg[0] = "subcommand"
+	fs = flag.new()
+	fs:string("name", "foo", "String help string")
+	fs:stringArg("title", 2, "Title")
+	flags = fs:parse(arg)
+	assert(type(flags.title) == "table", "expected flags.title to be a 'table'")
+	assert(#flags.title == 2, "expected flags.title to have length == 1")
+	assert(flags.title[1] == "bar", "expected flags.title[1] to be 'bar'")
+	assert(flags.title[2] == "baz", "expected flags.title[1] to be 'baz'")
+	`
+	doString(src, t)
+}
+
+func TestNStringsArgToFew(t *testing.T) {
+	src := `
+	local flag = require('flag')
+	arg = {"-name", "foo", "bar"}
+	arg[0] = "subcommand"
+	fs = flag.new()
+	fs:string("name", "foo", "String help string")
+	fs:stringArg("title", 2, "Title")
+	ok, err = pcall(function() fs:parse(arg) end)
+	print(err)
+	`
+	expected := "<string>:8: argument title: expected 2 strings"
+	stdout, _ := doString(src, t)
+	if stdout != expected {
+		t.Errorf("expected: `%v`\ngot: `%v`\nsrc: `%v`", expected, stdout, src)
+	}
+}
+
+func TestStringArgumentCompgen(t *testing.T) {
+	src := `
+	local flag = require('flag')
+	arg = {"-name", "foo", "m"}
+	arg[0] = "subcommand"
+	fs = flag.new("subcommand")
+	local function compgen()
+		return "fii foo fum"
+	end
+
+	res = {}
+	fs:string("name", "foo", "String help string", compgen)
+	fs:stringArg("mr", 1, "Title", function(arg, flags, raw)
+		res.arg = arg
+		res.flags = flags
+		res.raw = raw
+		return "mr miss mrs"
+	end)
+	flags = fs:compgen(3, arg)
+
+	assert(res.arg == "m", "expected arg to be 'm', got " .. res.arg)
+	assert(res.flags.name == "foo", "expected flag.names to be 'foo', got " .. res.flags.name)
+	assert(res.raw[0] == "subcommand", "expected raw[0] to be 'subcommand', got " .. res.raw[0])
+	assert(res.raw[1] == "-name", "expected raw[1] to be '-name', got " .. res.raw[1])
+	print(flags)
+	`
 
 	expected := strings.Join([]string{
 		"mr",
@@ -383,5 +545,56 @@ func TestArgumentCompgen(t *testing.T) {
 
 	if got != expected {
 		t.Errorf("expected: `%v`, got: `%v`\nsrc: `%v`", expected, got, src)
+	}
+}
+
+func TeststringArgumentCompgen2(t *testing.T) {
+	src := `
+	local flag = require('flag')
+	arg = {"-name", "foo", "m"}
+	arg[0] = "subcommand"
+	fs = flag.new()
+	local function compgen()
+		return "fii foo fum"
+	end
+	fs:string("name", "foo", "String help string", compgen)
+	fs:stringArgument("mr", 1, "Title", function()
+		return "mr miss mrs"
+	end)
+	flags = fs:compgen(3, arg)
+
+	print(flags)
+	`
+
+	expected := strings.Join([]string{
+		"mr",
+		"miss",
+		"mrs",
+	}, " ")
+	got, _ := doString(src, t)
+
+	if got != expected {
+		t.Errorf("expected: `%v`, got: `%v`\nsrc: `%v`", expected, got, src)
+	}
+}
+
+func TestStringArgumentUsage(t *testing.T) {
+	src := `
+	local flag = require('flag')
+	fs = flag.new("subcommand")
+	fs:stringArg("title", 1, "Your title")
+
+	print(fs:usage())
+	`
+
+	expected := strings.Join([]string{
+		"usage: subcommand title ",
+		"  title string",
+		"    \tYour title\n",
+	}, "\n")
+	got, _ := doString(src, t)
+
+	if got != expected {
+		t.Errorf("expected stdout: `%v`\ngot: `%v`\nsrc: `%v`", expected, got, src)
 	}
 }

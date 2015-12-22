@@ -1,432 +1,310 @@
 package gluaflag
 
 import (
-	"flag"
 	"fmt"
-	"os"
-	"strings"
+	"strconv"
 
 	"github.com/yuin/gopher-lua"
 )
 
-var exports = map[string]lua.LGFunction{
-	"new": new,
-}
-
-const luaFlagTypeName = "flag"
-
-// Gluaflag is the background userdata component
-type Gluaflag struct {
-	fs        *flag.FlagSet
-	flags     map[string]interface{}
-	compFn    map[string]*lua.LFunction
-	arguments arguments
-}
+var flagFuncs = map[string]lua.LGFunction{}
 
 type flg struct {
-	name   string
-	value  interface{}
-	usage  string
-	compFn *lua.LFunction
+	name     string
+	value    interface{}
+	usage    string
+	required bool
+	compFn   *lua.LFunction
 }
 
-type flgs []*flg
-
-type argument struct {
-	name   string
-	times  int
-	usage  string
-	compFn *lua.LFunction
-}
-
-type arguments []*argument
-
-func (gf *Gluaflag) printFlags() string {
-	var s []string
-	gf.fs.VisitAll(func(fl *flag.Flag) {
-		s = append(s, "-"+fl.Name)
-	})
-	return strings.Join(s, " ")
-}
-
-// Compgen returns a string with possible options for the flag
-func (gf *Gluaflag) Compgen(L *lua.LState, compCWords int, compWords []string) string {
-	if compCWords == 1 && len(compWords) == 1 {
-		return gf.printFlags()
-	}
-
-	if compCWords <= len(compWords) {
-		prev := compWords[compCWords-1]
-		if string(prev[0]) == "-" {
-			fl := gf.fs.Lookup(prev[1:len(prev)])
-			v, ok := gf.flags[fl.Name]
-			if !ok {
-				return ""
-			}
-			switch value := v.(type) {
-			case *bool:
-				if string(compWords[len(compWords)-1][0]) == "-" {
-					return gf.printFlags()
-				}
-				return ""
-			case *string, *float64:
-				if fn, ok := gf.compFn[fl.Name]; ok {
-					if err := L.CallByParam(lua.P{
-						Fn:      fn,
-						NRet:    1,
-						Protect: true,
-					}); err != nil {
-						fmt.Fprintf(os.Stderr, "%v\n", err)
-						os.Exit(1)
-					}
-					res := L.Get(-1)
-					L.Pop(1)
-					return res.String()
-				}
-			default:
-				L.RaiseError("not implemented type: %T", value)
-				return ""
-			}
-		} else if string(compWords[len(compWords)-1][0]) == "-" {
-			return gf.printFlags()
-		} else { // argument
-			return ""
-		}
-
-	}
-	return ""
-}
-
-func toStringSlice(t *lua.LTable) []string {
-	args := make([]string, 0, t.Len())
-	if zv := t.RawGet(lua.LNumber(0)); zv.Type() != lua.LTNil {
-		args = append(args, zv.String())
-	}
-
-	t.ForEach(func(k, v lua.LValue) {
-		if key, ok := k.(lua.LNumber); !ok || int(key) < 1 {
-			return
-		}
-		args = append(args, v.String())
-	})
-	return args
-}
-
-func compgen(L *lua.LState) int {
-	ud := L.CheckUserData(1)
-	compCWords := L.CheckInt(2)
-	compWords := L.CheckTable(3)
-
-	gf, ok := ud.Value.(*Gluaflag)
-	if !ok {
-		L.RaiseError("Expected gluaflag userdata, got `%T`", ud.Value)
-	}
-
-	comp := gf.Compgen(L, compCWords, toStringSlice(compWords))
-
-	L.Push(lua.LString(comp))
-	return 1
-}
-
-var flagFuncs = map[string]lua.LGFunction{
-	"number":  number,
-	"numbers": numbers,
-	"int":     integer,
-	"ints":    integers,
-	"string":  str,
-	"strings": strs,
-	"bool":    boolean,
-	"parse":   parse,
-	"compgen": compgen,
-}
-
-// Loader is used for preloading the module
-func Loader(L *lua.LState) int {
-
-	// register functions to the table
-	mod := L.SetFuncs(L.NewTable(), exports)
-	// set up meta table
-	// mt := L.NewTable()
-	// L.SetField(mt, "__index", L.NewClosure(moduleIndex))
-	// L.SetField(mt, "__call", L.NewClosure(moduleCall))
-	// L.SetMetatable(mod, mt)
-
-	flagMetaTable := L.NewTypeMetatable(luaFlagTypeName)
-	L.SetField(flagMetaTable, "__index", L.SetFuncs(L.NewTable(), flagFuncs))
-
-	// returns the module
-	L.Push(mod)
-	return 1
-}
-
-// New returns a new flagset userdata
-func New(L *lua.LState) *lua.LUserData {
-	// TODO: refactor to function
-	var d lua.LValue = lua.LString("")
-	larg := L.GetGlobal("arg")
-	targ, ok := larg.(*lua.LTable)
-	if ok {
-		d = targ.RawGetInt(0)
-	}
-
-	name := L.OptString(1, d.String())
-	flags := &Gluaflag{
-		fs:     flag.NewFlagSet(name, flag.ContinueOnError),
-		flags:  make(map[string]interface{}),
-		compFn: make(map[string]*lua.LFunction),
-	}
-
+func (f *flg) userdata(L *lua.LState) lua.LValue {
 	ud := L.NewUserData()
-	ud.Value = flags
+	ud.Value = f
 	L.SetMetatable(ud, L.GetTypeMetatable(luaFlagTypeName))
 	return ud
 }
 
-func new(L *lua.LState) int {
-	L.Push(New(L))
+type flgs map[string]*flg
 
-	return 1
+type argument struct {
+	name       string
+	times      int
+	glob       bool
+	optional   bool
+	usage      string
+	value      lua.LValue
+	typ        string
+	parser     parser
+	shortUsage shortUsage
+	compFn     *lua.LFunction
 }
 
-func number(L *lua.LState) int {
-	ud := L.CheckUserData(1)
-	name := L.CheckString(2)
-	value := L.CheckNumber(3)
-	usage := L.CheckString(4)
-	cf := L.OptFunction(5, L.NewFunction(func(L *lua.LState) int {
-		L.Push(lua.LString(""))
-		return 1
-	}))
+type arguments []*argument
 
-	gf, ok := ud.Value.(*Gluaflag)
-	if !ok {
-		L.RaiseError("Expected gluaflag userdata, got `%T`", ud.Value)
-	}
+type parser func([]string, *lua.LState) ([]string, lua.LValue, error)
 
-	f := gf.fs.Float64(name, float64(value), usage)
-	gf.flags[name] = f
-	gf.compFn[name] = cf
+type shortUsage func(string) string
 
-	return 0
+func (a *argument) parse(args []string, L *lua.LState) ([]string, error) {
+	args, value, err := a.parser(args, L)
+	a.value = value
+	return args, err
 }
 
-func numbers(L *lua.LState) int {
-	ud := L.CheckUserData(1)
-	name := L.CheckString(2)
-	usage := L.CheckString(3)
-	cf := L.OptFunction(4, L.NewFunction(func(L *lua.LState) int {
-		L.Push(lua.LString(""))
-		return 1
-	}))
-
-	gf, ok := ud.Value.(*Gluaflag)
-	if !ok {
-		L.RaiseError("Expected gluaflag userdata, got `%T`", ud.Value)
+// string parsers
+func parseString(args []string, L *lua.LState) ([]string, lua.LValue, error) {
+	if len(args) < 1 {
+		return args, lua.LNil, fmt.Errorf("expected string")
 	}
-
-	var numbers numberslice
-	gf.fs.Var(&numbers, name, usage)
-	gf.flags[name] = &numbers
-	gf.compFn[name] = cf
-
-	return 0
+	return parseOptionalString(args, L)
 }
 
-func integer(L *lua.LState) int {
-	ud := L.CheckUserData(1)
-	name := L.CheckString(2)
-	value := L.CheckInt(3)
-	usage := L.CheckString(4)
-	cf := L.OptFunction(5, L.NewFunction(func(L *lua.LState) int {
-		L.Push(lua.LString(""))
-		return 1
-	}))
-
-	gf, ok := ud.Value.(*Gluaflag)
-	if !ok {
-		L.RaiseError("Expected gluaflag userdata, got `%T`", ud.Value)
+func parseOptionalString(args []string, L *lua.LState) ([]string, lua.LValue, error) {
+	if len(args) < 1 {
+		return args, lua.LNil, nil
 	}
-
-	f := gf.fs.Int(name, int(value), usage)
-	gf.flags[name] = f
-	gf.compFn[name] = cf
-
-	return 0
+	return args[1:len(args)], lua.LString(args[0]), nil
 }
 
-func integers(L *lua.LState) int {
-	ud := L.CheckUserData(1)
-	name := L.CheckString(2)
-	usage := L.CheckString(3)
-	cf := L.OptFunction(4, L.NewFunction(func(L *lua.LState) int {
-		L.Push(lua.LString(""))
-		return 1
-	}))
-
-	gf, ok := ud.Value.(*Gluaflag)
-	if !ok {
-		L.RaiseError("Expected gluaflag userdata, got `%T`", ud.Value)
+func parseNStrings(n int) parser {
+	return func(args []string, L *lua.LState) ([]string, lua.LValue, error) {
+		if len(args) < n {
+			return args, lua.LNil, fmt.Errorf("expected %v strings", n)
+		}
+		table := L.NewTable()
+		for i := 0; i < n; i++ {
+			table.Append(lua.LString(args[i]))
+		}
+		return args[n:len(args)], table, nil
 	}
-
-	var ints intslice
-	gf.fs.Var(&ints, name, usage)
-	gf.flags[name] = &ints
-	gf.compFn[name] = cf
-
-	return 0
 }
 
-func str(L *lua.LState) int {
-	ud := L.CheckUserData(1)
-	name := L.CheckString(2)
-	value := L.CheckString(3)
-	usage := L.CheckString(4)
-	cf := L.OptFunction(5, L.NewFunction(func(L *lua.LState) int {
-		L.Push(lua.LString(""))
-		return 1
-	}))
-
-	gf, ok := ud.Value.(*Gluaflag)
-	if !ok {
-		L.RaiseError("Expected gluaflag userdata, got `%T`", ud.Value)
+func parseStrings(args []string, L *lua.LState) ([]string, lua.LValue, error) {
+	if len(args) < 1 {
+		return args, L.NewTable(), fmt.Errorf("expected at least one string")
 	}
 
-	f := gf.fs.String(name, value, usage)
-	gf.flags[name] = f
-	gf.compFn[name] = cf
-
-	return 0
+	return parseOptionalStrings(args, L)
 }
 
-func arg(L *lua.LState) int {
-	ud := L.CheckUserData(1)
-	name := L.CheckString(2)
-	times := L.CheckInt(3)
-	usage := L.CheckString(4)
-	cf := L.OptFunction(5, L.NewFunction(func(L *lua.LState) int {
-		L.Push(lua.LString(""))
-		return 1
-	}))
-
-	gf, ok := ud.Value.(*Gluaflag)
-	if !ok {
-		L.RaiseError("Expected gluaflag userdata, got `%T`", ud.Value)
+func parseOptionalStrings(args []string, L *lua.LState) ([]string, lua.LValue, error) {
+	table := L.NewTable()
+	for i := 0; i < len(args); i++ {
+		table.Append(lua.LString(args[i]))
 	}
-
-	arg := &argument{
-		name:   name,
-		times:  times,
-		usage:  usage,
-		compFn: cf,
-	}
-
-	gf.arguments = append(gf.arguments, arg)
-
-	return 0
+	return make([]string, 0), table, nil
 }
 
-func strs(L *lua.LState) int {
-	ud := L.CheckUserData(1)
-	name := L.CheckString(2)
-	usage := L.CheckString(3)
-	cf := L.OptFunction(4, L.NewFunction(func(L *lua.LState) int {
-		L.Push(lua.LString(""))
-		return 1
-	}))
-
-	gf, ok := ud.Value.(*Gluaflag)
-	if !ok {
-		L.RaiseError("Expected gluaflag userdata, got `%T`", ud.Value)
+// integer parsers
+func parseInt(args []string, L *lua.LState) ([]string, lua.LValue, error) {
+	if len(args) < 1 {
+		return args, lua.LNil, fmt.Errorf("expected string")
 	}
-
-	var strs stringslice
-	gf.fs.Var(&strs, name, usage)
-	gf.flags[name] = &strs
-	gf.compFn[name] = cf
-
-	return 0
+	return parseOptionalInt(args, L)
 }
 
-func boolean(L *lua.LState) int {
-	ud := L.CheckUserData(1)
-	name := L.CheckString(2)
-	value := L.CheckBool(3)
-	usage := L.CheckString(4)
-
-	gf, ok := ud.Value.(*Gluaflag)
-	if !ok {
-		L.RaiseError("Expected gluaflag userdata, got `%T`", ud.Value)
+func parseOptionalInt(args []string, L *lua.LState) ([]string, lua.LValue, error) {
+	if len(args) < 1 {
+		return args, lua.LNil, nil
 	}
-
-	f := gf.fs.Bool(name, value, usage)
-	gf.flags[name] = f
-
-	return 0
-}
-
-// UserDataTypeError is returned when it is not a flag userdata received
-var ErrUserDataType = fmt.Errorf("Expected gluaflag userdata")
-
-// Parse the command line parameters
-func Parse(L *lua.LState, ud *lua.LUserData, args []string) (*lua.LTable, error) {
-	gf, ok := ud.Value.(*Gluaflag)
-	if !ok {
-		L.RaiseError("Expected gluaflag userdata, got `%T`", ud.Value)
-		return nil, ErrUserDataType
-	}
-
-	err := gf.fs.Parse(args)
+	i, err := strconv.Atoi(args[0])
 	if err != nil {
-		// L.RaiseError("%v", err)
-		return nil, err
+		return args[1:len(args)], lua.LNumber(0), fmt.Errorf("invalid integer value: %v", args[0])
+	}
+	return args[1:len(args)], lua.LNumber(i), nil
+}
+
+func parseNInts(n int) parser {
+	return func(args []string, L *lua.LState) ([]string, lua.LValue, error) {
+		if len(args) < n {
+			return args, lua.LNil, fmt.Errorf("expected %v integers", n)
+		}
+		table := L.NewTable()
+		for i := 0; i < n; i++ {
+			v, err := strconv.Atoi(args[i])
+			if err != nil {
+				return args[1:len(args)], lua.LNumber(0), fmt.Errorf("invalid integer value: %v", args[i])
+			}
+			table.Append(lua.LNumber(v))
+		}
+		return args[n:len(args)], table, nil
+	}
+}
+
+func parseInts(args []string, L *lua.LState) ([]string, lua.LValue, error) {
+	if len(args) < 1 {
+		return args, L.NewTable(), fmt.Errorf("expected at least one integer")
 	}
 
-	t := L.NewTable()
-	for f, v := range gf.flags {
-		switch value := v.(type) {
-		case *float64:
-			t.RawSetString(f, lua.LNumber(*value))
-		case *string:
-			t.RawSetString(f, lua.LString(*value))
-		case *bool:
-			t.RawSetString(f, lua.LBool(*value))
-		case *int:
-			t.RawSetString(f, lua.LNumber(*value))
-		case *intslice:
-			t.RawSetString(f, value.Table(L))
-		case *numberslice:
-			t.RawSetString(f, value.Table(L))
-		case *stringslice:
-			t.RawSetString(f, value.Table(L))
-		default:
-			L.RaiseError("unknown type: `%T`", v)
+	return parseOptionalInts(args, L)
+}
+
+func parseOptionalInts(args []string, L *lua.LState) ([]string, lua.LValue, error) {
+	table := L.NewTable()
+	for i := 0; i < len(args); i++ {
+		v, err := strconv.Atoi(args[i])
+		if err != nil {
+			return args[1:len(args)], lua.LNumber(0), fmt.Errorf("invalid integer value: %v", args[i])
+		}
+		table.Append(lua.LNumber(v))
+	}
+	return make([]string, 0), table, nil
+}
+
+// number parsers
+func parseNumber(args []string, L *lua.LState) ([]string, lua.LValue, error) {
+	if len(args) < 1 {
+		return args, lua.LNil, fmt.Errorf("expected string")
+	}
+	return parseOptionalNumber(args, L)
+}
+
+func parseOptionalNumber(args []string, L *lua.LState) ([]string, lua.LValue, error) {
+	if len(args) < 1 {
+		return args, lua.LNil, nil
+	}
+	i, err := strconv.ParseFloat(args[0], 64)
+	if err != nil {
+		return args[1:len(args)], lua.LNumber(0), fmt.Errorf("invalid number value: %v", args[0])
+	}
+	return args[1:len(args)], lua.LNumber(i), nil
+}
+
+func parseNNumbers(n int) parser {
+	return func(args []string, L *lua.LState) ([]string, lua.LValue, error) {
+		if len(args) < n {
+			return args, lua.LNil, fmt.Errorf("expected %v numbers", n)
+		}
+		table := L.NewTable()
+		for i := 0; i < n; i++ {
+			v, err := strconv.ParseFloat(args[i], 64)
+			if err != nil {
+				return args[1:len(args)], lua.LNumber(0), fmt.Errorf("invalid number value: %v", args[i])
+			}
+			table.Append(lua.LNumber(v))
+		}
+		return args[n:len(args)], table, nil
+	}
+}
+
+func parseNumbers(args []string, L *lua.LState) ([]string, lua.LValue, error) {
+	if len(args) < 1 {
+		return args, L.NewTable(), fmt.Errorf("expected at least one number")
+	}
+
+	return parseOptionalNumbers(args, L)
+}
+
+func parseOptionalNumbers(args []string, L *lua.LState) ([]string, lua.LValue, error) {
+	table := L.NewTable()
+	for i := 0; i < len(args); i++ {
+		v, err := strconv.ParseFloat(args[i], 64)
+		if err != nil {
+			return args[1:len(args)], lua.LNumber(0), fmt.Errorf("invalid number value: %v", args[i])
+		}
+		table.Append(lua.LNumber(v))
+	}
+	return make([]string, 0), table, nil
+}
+
+func getParser(typ string, option lua.LValue) (parser, error) {
+	parsers := map[string]map[string]parser{
+		"string": {
+			"+": parseStrings,
+			"*": parseOptionalStrings,
+			"?": parseOptionalString,
+			"1": parseString,
+		},
+		"int": {
+			"+": parseInts,
+			"*": parseOptionalInts,
+			"?": parseOptionalInt,
+			"1": parseInt,
+		},
+		"number": {
+			"+": parseNumbers,
+			"*": parseOptionalNumbers,
+			"?": parseOptionalNumber,
+			"1": parseNumber,
+		},
+	}
+
+	nParsers := map[string]func(int) parser{
+		"string": parseNStrings,
+		"int":    parseNInts,
+		"number": parseNNumbers,
+	}
+
+	switch t := option.(type) {
+	case lua.LString:
+		if p, ok := parsers[typ][string(t)]; ok {
+			return p, nil
+		}
+	case lua.LNumber:
+		switch {
+		case int(t) == 1:
+			return parsers[typ]["1"], nil
+		case int(t) > 1:
+			return nParsers[typ](int(t)), nil
 		}
 	}
 
-	for _, v := range gf.fs.Args() {
-		t.Append(lua.LString(v))
-	}
-
-	return t, nil
+	return nil, fmt.Errorf("nargs should be an integer or one of '?', '*', or '+'")
 }
 
-func parse(L *lua.LState) int {
-	ud := L.CheckUserData(1)
-	args := L.CheckTable(2)
-	a := make([]string, 0, args.Len())
+func getShortUsageFn(option lua.LValue) (shortUsage, error) {
+	su := map[string]shortUsage{
+		"?": func(name string) string {
+			return fmt.Sprintf("[%v] ", name)
+		},
+		"1": func(name string) string {
+			return fmt.Sprintf("%v ", name)
+		},
 
-	args.ForEach(func(k, v lua.LValue) {
-		if v.Type() != lua.LTString {
-			L.RaiseError("Expected string type, got: `%v`", v.Type())
-		}
-		a = append(a, v.String())
-	})
-
-	t, err := Parse(L, ud, a)
-	if err != nil {
-		L.RaiseError("%v", err)
+		"*": func(name string) string {
+			return fmt.Sprintf("[%v...] ", name)
+		},
+		"+": func(name string) string {
+			return fmt.Sprintf("%v [%v...] ", name, name)
+		},
 	}
 
-	L.Push(t)
-	return 1
+	shortNUsage := func(n int) shortUsage {
+		return func(name string) string {
+			usage := ""
+			for i := 0; i < n; i++ {
+				usage = fmt.Sprintf("%v %v ", usage, name)
+			}
+			return usage
+		}
+	}
+
+	switch t := option.(type) {
+	case lua.LString:
+		if p, ok := su[string(t)]; ok {
+			return p, nil
+		}
+	case lua.LNumber:
+		switch {
+		case int(t) == 1:
+			return su["1"], nil
+		case int(t) > 1:
+			return shortNUsage(int(t)), nil
+		}
+	}
+
+	return nil, fmt.Errorf("nargs should be an integer or one of '?', '*', or '+'")
+}
+
+func (a *argument) toLValue(L *lua.LState) lua.LValue {
+	return a.value
+}
+
+func (a *argument) generateUsage() string {
+	typ := a.typ
+	if typ == "" {
+		typ = "string"
+	}
+
+	return fmt.Sprintf("  %v %v\n    \t%v\n", a.name, typ, a.usage)
 }

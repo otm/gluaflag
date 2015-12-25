@@ -133,7 +133,7 @@ func (fs *FlagSet) printFlags() string {
 	fs.fs.VisitAll(func(fl *flag.Flag) {
 		s = append(s, "-"+fl.Name)
 	})
-	return strings.Join(s, " ")
+	return strings.Join(s, "\n")
 }
 
 // Compgen returns a string with possible options for the flag
@@ -156,12 +156,31 @@ func (fs *FlagSet) Compgen(L *lua.LState, compCWords int, compWords []string) st
 					return fs.printFlags()
 				}
 				return ""
-			case *string, *float64:
+			case *string, *float64, *int:
+				word := compWords[len(compWords)-1]
+				if compCWords == len(compWords) {
+					word = ""
+				}
+
+				table := L.NewTable()
+				fs.fs.Visit(func(f *flag.Flag) {
+					table.RawSetString(f.Name, lua.LString(f.Value.String()))
+				})
+
+				raw := L.NewTable()
+				for i, word := range compWords {
+					if i == 0 {
+						raw.RawSet(lua.LNumber(0), lua.LString(word))
+						continue
+					}
+					raw.Append(lua.LString(word))
+				}
+
 				if err := L.CallByParam(lua.P{
 					Fn:      v.compFn,
 					NRet:    1,
 					Protect: true,
-				}); err != nil {
+				}, lua.LString(word), table, raw); err != nil {
 					fmt.Fprintf(os.Stderr, "%v\n", err)
 					os.Exit(1)
 				}
@@ -201,6 +220,10 @@ func (fs *FlagSet) Compgen(L *lua.LState, compCWords int, compWords []string) st
 					continue
 				}
 				raw.Append(lua.LString(word))
+			}
+
+			if nargs >= len(fs.arguments) || nargs < 0 {
+				return ""
 			}
 
 			if err := L.CallByParam(lua.P{

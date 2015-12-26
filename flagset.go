@@ -44,6 +44,10 @@ func New(name string, L *lua.LState) *lua.LUserData {
 		arguments: make(arguments, 0),
 	}
 
+	flags.fs.Usage = func() {
+		fmt.Print(flags.Usage())
+	}
+
 	ud := L.NewUserData()
 	ud.Value = flags
 	L.SetMetatable(ud, L.GetTypeMetatable(luaFlagSetTypeName))
@@ -136,10 +140,18 @@ func (fs *FlagSet) printFlags() string {
 	return strings.Join(s, "\n")
 }
 
+func (fs *FlagSet) getFlags() []string {
+	var s []string
+	fs.fs.VisitAll(func(fl *flag.Flag) {
+		s = append(s, "-"+fl.Name)
+	})
+	return s
+}
+
 // Compgen returns a string with possible options for the flag
-func (fs *FlagSet) Compgen(L *lua.LState, compCWords int, compWords []string) string {
+func (fs *FlagSet) Compgen(L *lua.LState, compCWords int, compWords []string) []string {
 	if compCWords == 1 && len(compWords) == 1 {
-		return fs.printFlags()
+		return fs.getArguments(compCWords, compWords, L)
 	}
 
 	if compCWords <= len(compWords) {
@@ -148,14 +160,14 @@ func (fs *FlagSet) Compgen(L *lua.LState, compCWords int, compWords []string) st
 			fl := fs.fs.Lookup(prev[1:len(prev)])
 			v, ok := fs.flags[fl.Name]
 			if !ok {
-				return ""
+				return []string{}
 			}
 			switch value := v.value.(type) {
 			case *bool:
 				if string(compWords[len(compWords)-1][0]) == "-" {
-					return fs.printFlags()
+					return fs.getFlags()
 				}
-				return ""
+				return []string{}
 			case *string, *float64, *int:
 				word := compWords[len(compWords)-1]
 				if compCWords == len(compWords) {
@@ -178,68 +190,104 @@ func (fs *FlagSet) Compgen(L *lua.LState, compCWords int, compWords []string) st
 
 				if err := L.CallByParam(lua.P{
 					Fn:      v.compFn,
-					NRet:    1,
+					NRet:    -1,
 					Protect: true,
 				}, lua.LString(word), table, raw); err != nil {
 					fmt.Fprintf(os.Stderr, "%v\n", err)
 					os.Exit(1)
 				}
-				res := L.Get(-1)
-				L.Pop(1)
-				return res.String()
+
+				if L.GetTop() == 1 {
+					res := L.Get(-1)
+					L.Pop(1)
+					switch r := res.(type) {
+					case *lua.LTable:
+						return toStringSlice(r)
+					default:
+						L.RaiseError("unknown type: %T", r)
+					}
+				}
+
+				res := []string{}
+				for i := 1; i <= L.GetTop(); i++ {
+					res = append(res, L.Get(-i).String())
+				}
+				L.Pop(L.GetTop())
+				return res
 
 			default:
 				L.RaiseError("not implemented type: %T", value)
-				return ""
+				return []string{}
 			}
 		} else if string(compWords[len(compWords)-1][0]) == "-" {
-			return fs.printFlags()
+			// current argument starts with "-"
+			return fs.getFlags()
 		} else { // argument
-			err := fs.fs.Parse(compWords[1:len(compWords)])
-			if err != nil {
-				return ""
-			}
-			nargs := fs.fs.NArg()
-			if nargs == len(fs.arguments) {
-				nargs--
-			}
-			word := compWords[len(compWords)-1]
-			if compCWords == len(compWords) {
-				word = ""
-			}
-
-			table := L.NewTable()
-			fs.fs.Visit(func(f *flag.Flag) {
-				table.RawSetString(f.Name, lua.LString(f.Value.String()))
-			})
-
-			raw := L.NewTable()
-			for i, word := range compWords {
-				if i == 0 {
-					raw.RawSet(lua.LNumber(0), lua.LString(word))
-					continue
-				}
-				raw.Append(lua.LString(word))
-			}
-
-			if nargs >= len(fs.arguments) || nargs < 0 {
-				return ""
-			}
-
-			if err := L.CallByParam(lua.P{
-				Fn:      fs.arguments[nargs].compFn,
-				NRet:    1,
-				Protect: true,
-			}, lua.LString(word), table, raw); err != nil {
-				fmt.Fprintf(os.Stderr, "%v\n", err)
-				os.Exit(1)
-			}
-			res := L.Get(-1)
-			L.Pop(1)
-			return res.String()
+			return fs.getArguments(compCWords, compWords, L)
 		}
 	}
-	return ""
+	return []string{}
+}
+
+func (fs *FlagSet) getArguments(compCWords int, compWords []string, L *lua.LState) []string {
+	err := fs.fs.Parse(compWords[1:len(compWords)])
+	if err != nil {
+		return []string{}
+	}
+	nargs := fs.fs.NArg()
+	if nargs == len(fs.arguments) {
+		nargs--
+	}
+	word := compWords[len(compWords)-1]
+	if compCWords == len(compWords) {
+		word = ""
+	}
+
+	table := L.NewTable()
+	fs.fs.Visit(func(f *flag.Flag) {
+		table.RawSetString(f.Name, lua.LString(f.Value.String()))
+	})
+
+	raw := L.NewTable()
+	for i, word := range compWords {
+		if i == 0 {
+			raw.RawSet(lua.LNumber(0), lua.LString(word))
+			continue
+		}
+		raw.Append(lua.LString(word))
+	}
+
+	if nargs >= len(fs.arguments) || nargs < 0 {
+		return []string{}
+	}
+
+	if err := L.CallByParam(lua.P{
+		Fn:      fs.arguments[nargs].compFn,
+		NRet:    -1,
+		Protect: true,
+	}, lua.LString(word), table, raw); err != nil {
+		fmt.Fprintf(os.Stderr, "%v\n", err)
+		os.Exit(1)
+	}
+
+	if L.GetTop() == 1 {
+		res := L.Get(-1)
+		L.Pop(1)
+		switch r := res.(type) {
+		case *lua.LTable:
+			return toStringSlice(r)
+		default:
+			L.RaiseError("unknown type: %T", r)
+		}
+	}
+
+	res := []string{}
+	for i := 1; i <= L.GetTop(); i++ {
+		res = append(res, L.Get(-i).String())
+	}
+	L.Pop(L.GetTop())
+	return res
+
 }
 
 func compgen(L *lua.LState) int {
@@ -254,7 +302,7 @@ func compgen(L *lua.LState) int {
 
 	comp := gf.Compgen(L, compCWords, toStringSlice(compWords))
 
-	L.Push(lua.LString(comp))
+	L.Push(toTable(comp, L))
 	return 1
 }
 

@@ -203,6 +203,14 @@ func (fs *FlagSet) Compgen(L *lua.LState, compCWords int, compWords []string) []
 					switch r := res.(type) {
 					case *lua.LTable:
 						return toStringSlice(r)
+					case lua.LString:
+						s := string(r)
+						if strings.Index(s, "\n") > 0 {
+							return strings.Split(s, "\n")
+						}
+						return []string{s}
+					case *lua.LFunction:
+						return forEachStrings(L, r)
 					default:
 						L.RaiseError("unknown type: %T", r)
 					}
@@ -276,6 +284,14 @@ func (fs *FlagSet) getArguments(compCWords int, compWords []string, L *lua.LStat
 		switch r := res.(type) {
 		case *lua.LTable:
 			return toStringSlice(r)
+		case *lua.LString:
+			s := string(*r)
+			if strings.Index(s, "\n") > 0 {
+				return strings.Split(s, "\n")
+			}
+			return []string{s}
+		case *lua.LFunction:
+			return forEachStrings(L, r)
 		default:
 			L.RaiseError("unknown type: %T", r)
 		}

@@ -24,3 +24,29 @@ func toTable(s []string, L *lua.LState) *lua.LTable {
 	}
 	return table
 }
+
+func forEachStrings(L *lua.LState, fn *lua.LFunction) []string {
+	p := lua.P{
+		Fn:      fn,
+		NRet:    -1,
+		Protect: true,
+	}
+	res := []string{}
+
+	for L.CallByParam(p) != nil {
+		switch L.GetTop() {
+		case 0:
+			break
+		case 1:
+			res = append(res, L.Get(-1).String())
+			L.Pop(1)
+		case 2:
+			res = append(res, L.Get(-2).String())
+			L.Pop(2)
+		default:
+			L.RaiseError("Iterator should return 1 or 2 arguments: got %v", L.GetTop())
+		}
+	}
+
+	return res
+}

@@ -17,7 +17,7 @@ func toStringSlice(t *lua.LTable) []string {
 	return args
 }
 
-func toTable(s []string, L *lua.LState) *lua.LTable {
+func toTable(L *lua.LState, s []string) *lua.LTable {
 	table := L.NewTable()
 	for _, str := range s {
 		table.Append(lua.LString(str))
@@ -49,4 +49,14 @@ func forEachStrings(L *lua.LState, fn *lua.LFunction) []string {
 	}
 
 	return res
+}
+
+func checkFlagSet(L *lua.LState, i int) *FlagSet {
+	ud := L.CheckUserData(i)
+	if gf, ok := ud.Value.(*FlagSet); ok {
+		return gf
+	}
+
+	L.RaiseError("expected flagset userdata, got: `%T`", ud.Value)
+	return nil
 }

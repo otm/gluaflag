@@ -35,7 +35,7 @@ type FlagSet struct {
 }
 
 // New returns a new flagset userdata
-func New(name string, L *lua.LState) *lua.LUserData {
+func New(L *lua.LState, name string) *lua.LUserData {
 
 	flags := &FlagSet{
 		name:      name,
@@ -57,13 +57,12 @@ func New(name string, L *lua.LState) *lua.LUserData {
 func new(L *lua.LState) int {
 	var d lua.LValue = lua.LString("")
 	larg := L.GetGlobal("arg")
-	targ, ok := larg.(*lua.LTable)
-	if ok {
+	if targ, ok := larg.(*lua.LTable); ok {
 		d = targ.RawGetInt(0)
 	}
 	name := L.OptString(1, d.String())
 
-	L.Push(New(name, L))
+	L.Push(New(L, name))
 
 	return 1
 }
@@ -118,18 +117,6 @@ func (fs *FlagSet) ArgDefaults() string {
 	}
 
 	return buff.String()
-}
-
-func usage(L *lua.LState) int {
-	ud := L.CheckUserData(1)
-
-	gf, ok := ud.Value.(*FlagSet)
-	if !ok {
-		L.RaiseError("Expected gluaflag userdata, got `%T`", ud.Value)
-	}
-
-	L.Push(lua.LString(gf.Usage()))
-	return 1
 }
 
 func (fs *FlagSet) printFlags() string {
@@ -188,6 +175,7 @@ func (fs *FlagSet) Compgen(L *lua.LState, compCWords int, compWords []string) []
 					raw.Append(lua.LString(word))
 				}
 
+				stack := L.GetTop()
 				if err := L.CallByParam(lua.P{
 					Fn:      v.compFn,
 					NRet:    -1,
@@ -196,8 +184,9 @@ func (fs *FlagSet) Compgen(L *lua.LState, compCWords int, compWords []string) []
 					fmt.Fprintf(os.Stderr, "%v\n", err)
 					os.Exit(1)
 				}
+				stack = L.GetTop() - stack
 
-				if L.GetTop() == 1 {
+				if stack == 1 {
 					res := L.Get(-1)
 					L.Pop(1)
 					switch r := res.(type) {
@@ -217,10 +206,10 @@ func (fs *FlagSet) Compgen(L *lua.LState, compCWords int, compWords []string) []
 				}
 
 				res := []string{}
-				for i := 1; i <= L.GetTop(); i++ {
+				for i := 1; i <= stack; i++ {
 					res = append(res, L.Get(-i).String())
 				}
-				L.Pop(L.GetTop())
+				L.Pop(stack)
 				return res
 
 			default:
@@ -269,6 +258,8 @@ func (fs *FlagSet) getArguments(compCWords int, compWords []string, L *lua.LStat
 		return []string{}
 	}
 
+	// stack is needed to know how the stack grows
+	stack := L.GetTop()
 	if err := L.CallByParam(lua.P{
 		Fn:      fs.arguments[nargs].compFn,
 		NRet:    -1,
@@ -277,8 +268,9 @@ func (fs *FlagSet) getArguments(compCWords int, compWords []string, L *lua.LStat
 		fmt.Fprintf(os.Stderr, "%v\n", err)
 		os.Exit(1)
 	}
+	stack = L.GetTop() - stack
 
-	if L.GetTop() == 1 {
+	if stack == 1 {
 		res := L.Get(-1)
 		L.Pop(1)
 		switch r := res.(type) {
@@ -298,12 +290,18 @@ func (fs *FlagSet) getArguments(compCWords int, compWords []string, L *lua.LStat
 	}
 
 	res := []string{}
-	for i := 1; i <= L.GetTop(); i++ {
+	for i := 1; i <= stack; i++ {
 		res = append(res, L.Get(-i).String())
 	}
-	L.Pop(L.GetTop())
+	L.Pop(stack)
 	return res
 
+}
+
+func usage(L *lua.LState) int {
+	gf := checkFlagSet(L, 1)
+	L.Push(lua.LString(gf.Usage()))
+	return 1
 }
 
 func compgen(L *lua.LState) int {
@@ -318,7 +316,7 @@ func compgen(L *lua.LState) int {
 
 	comp := gf.Compgen(L, compCWords, toStringSlice(compWords))
 
-	L.Push(toTable(comp, L))
+	L.Push(toTable(L, comp))
 	return 1
 }
 

@@ -39,17 +39,30 @@ type argument struct {
 	compFn     *lua.LFunction
 }
 
-type arguments []*argument
-
-type parser func([]string, *lua.LState) ([]string, lua.LValue, error)
-
-type shortUsage func(string) string
-
 func (a *argument) parse(args []string, L *lua.LState) ([]string, error) {
 	args, value, err := a.parser(args, L)
 	a.value = value
 	return args, err
 }
+
+func (a *argument) toLValue(L *lua.LState) lua.LValue {
+	return a.value
+}
+
+func (a *argument) generateUsage() string {
+	typ := a.typ
+	if typ == "" {
+		typ = "string"
+	}
+
+	return fmt.Sprintf("  %v %v\n    \t%v\n", a.name, typ, a.usage)
+}
+
+type arguments []*argument
+
+type parser func([]string, *lua.LState) ([]string, lua.LValue, error)
+
+type shortUsage func(string) string
 
 // string parsers
 func parseString(args []string, L *lua.LState) ([]string, lua.LValue, error) {
@@ -294,17 +307,4 @@ func getShortUsageFn(option lua.LValue) (shortUsage, error) {
 	}
 
 	return nil, fmt.Errorf("nargs should be an integer or one of '?', '*', or '+'")
-}
-
-func (a *argument) toLValue(L *lua.LState) lua.LValue {
-	return a.value
-}
-
-func (a *argument) generateUsage() string {
-	typ := a.typ
-	if typ == "" {
-		typ = "string"
-	}
-
-	return fmt.Sprintf("  %v %v\n    \t%v\n", a.name, typ, a.usage)
 }

@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"flag"
 	"fmt"
+	"io"
+	"io/ioutil"
 	"os"
 	"strings"
 
@@ -32,20 +34,23 @@ type FlagSet struct {
 	fs        *flag.FlagSet
 	flags     flgs
 	arguments arguments
+	output    io.Writer
 }
 
 // New returns a new flagset userdata
 func New(L *lua.LState, name string) *lua.LUserData {
+	f := flag.NewFlagSet(name, flag.ContinueOnError)
 
 	flags := &FlagSet{
 		name:      name,
-		fs:        flag.NewFlagSet(name, flag.ContinueOnError),
+		fs:        f,
 		flags:     make(flgs),
 		arguments: make(arguments, 0),
+		output:    os.Stderr,
 	}
 
 	flags.fs.Usage = func() {
-		fmt.Print(flags.Usage())
+		fmt.Fprint(flags.output, flags.Usage())
 	}
 
 	ud := L.NewUserData()
@@ -694,9 +699,10 @@ func Parse(L *lua.LState, ud *lua.LUserData, args []string) (*lua.LTable, error)
 		return nil, ErrUserDataType
 	}
 
+	gf.fs.SetOutput(ioutil.Discard)
+	gf.output = ioutil.Discard
 	err := gf.fs.Parse(args)
 	if err != nil {
-		// L.RaiseError("%v", err)
 		return nil, err
 	}
 
@@ -735,7 +741,7 @@ func Parse(L *lua.LState, ud *lua.LUserData, args []string) (*lua.LTable, error)
 	for _, arg := range gf.arguments {
 		args, err = arg.parse(args, L)
 		if err != nil {
-			return nil, fmt.Errorf("argument %v: %v", arg.name, err.Error())
+			return nil, fmt.Errorf("argument not provided: %v", arg.name)
 		}
 		t.RawSetString(arg.name, arg.toLValue(L))
 	}

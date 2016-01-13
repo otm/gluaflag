@@ -741,7 +741,7 @@ func Parse(L *lua.LState, ud *lua.LUserData, args []string) (*lua.LTable, error)
 	for _, arg := range gf.arguments {
 		args, err = arg.parse(args, L)
 		if err != nil {
-			return nil, fmt.Errorf("argument not provided: %v", arg.name)
+			return nil, fmt.Errorf("argument %v: %v", arg.name, err.Error())
 		}
 		t.RawSetString(arg.name, arg.toLValue(L))
 	}
